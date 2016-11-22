@@ -20,14 +20,19 @@ import {
     forwardRef,
     IterableDiffers
 } from '@angular/core';
-import {CommonModule} from '@angular/common';
-import {FormsModule, NG_VALUE_ACCESSOR, ControlValueAccessor} from '@angular/forms';
+import { CommonModule } from '@angular/common';
+import { FormsModule, NG_VALUE_ACCESSOR, ControlValueAccessor } from '@angular/forms';
 
 const MULTISELECT_VALUE_ACCESSOR: any = {
     provide: NG_VALUE_ACCESSOR,
     useExisting: forwardRef(() => MultiselectDropdown),
     multi: true
 };
+
+export interface IMultiSelectOptGroup {
+    groupName: String;
+    opts: Array<IMultiSelectOption>;
+}
 
 export interface IMultiSelectOption {
     id: number;
@@ -62,16 +67,16 @@ export interface IMultiSelectTexts {
 })
 export class MultiSelectSearchFilter {
     transform(options: Array<IMultiSelectOption>, args: string): Array<IMultiSelectOption> {
+
         return options.filter((option: IMultiSelectOption) => option.name.toLowerCase().indexOf((args || '').toLowerCase()) > -1);
     }
 }
 
 @Component({
+    moduleId: module.id,
     selector: 'ss-multiselect-dropdown',
     providers: [MULTISELECT_VALUE_ACCESSOR],
-    styles: [`
-		a { outline: none !important; }
-	`],
+    styleUrls: ['bootstrap.css', 'bootstrap-multiselect.css'],
     template: `
         <div class="btn-group">
             <button type="button" class="dropdown-toggle" [ngClass]="settings.buttonClasses" 
@@ -102,21 +107,33 @@ export class MultiSelectSearchFilter {
                     </a>
                 </li>
                 <li *ngIf="settings.showCheckAll || settings.showUncheckAll" class="divider"></li>
-                <li *ngFor="let option of options | searchFilter:searchFilterText">
-                    <a href="javascript:;" role="menuitem" tabindex="-1" (click)="setSelected($event, option)">
-                        <input *ngIf="settings.checkedStyle == 'checkboxes'" type="checkbox" [checked]="isSelected(option)" />
-                        <span *ngIf="settings.checkedStyle == 'glyphicon'" style="width: 16px;" 
-                        class="glyphicon" [class.glyphicon-ok]="isSelected(option)"></span>
-                        {{ option.name }}
-                    </a>
-                </li>
+                <template ngFor let-group="$implicit" [ngForOf]="options" let-i="index">
+                    <template [ngIf]="group.groupName">
+                        <li class="multiselect-item multiselect-group">
+                            <a href="javascript:void(0);" (click)="hideGroup($event, group.groupName)">
+                                <label><b> {{ group.groupName.toUpperCase() }}</b></label>
+                                <span class="caret-container"><b class="caret"></b></span>
+                            </a>
+                        </li>
+                    </template>
+                    <template [ngIf]="!isHiddenGroup(group.groupName)">
+                        <li *ngFor="let option of group.opts | searchFilter:searchFilterText">
+                            <a href="javascript:;" role="menuitem" tabindex="-1" (click)="setSelected($event, option)">
+                                <input *ngIf="settings.checkedStyle == 'checkboxes'" type="checkbox" [checked]="isSelected(option)" />
+                                <span *ngIf="settings.checkedStyle == 'glyphicon'" style="width: 16px;" 
+                                class="glyphicon" [class.glyphicon-ok]="isSelected(option)"></span>
+                                {{ option.name }}
+                            </a>
+                        </li>
+                    </template>
+                </template>
             </ul>
         </div>
     `
 })
 export class MultiselectDropdown implements OnInit, DoCheck, ControlValueAccessor {
 
-    @Input() options: Array<IMultiSelectOption>;
+    @Input() options: Array<IMultiSelectOptGroup | IMultiSelectOption>;
     @Input() settings: IMultiSelectSettings;
     @Input() texts: IMultiSelectTexts;
     @Output() selectionLimitReached = new EventEmitter();
@@ -135,6 +152,7 @@ export class MultiselectDropdown implements OnInit, DoCheck, ControlValueAccesso
         }
     }
 
+    optionsWithoutGroup: Array<IMultiSelectOption>;
     onModelChange: Function = (_: any) => {
     };
     onModelTouched: Function = () => {
@@ -166,9 +184,9 @@ export class MultiselectDropdown implements OnInit, DoCheck, ControlValueAccesso
         searchPlaceholder: 'Search...',
         defaultTitle: 'Select',
     };
-
+    hiddenGroup: string[] = [];
     constructor(private element: ElementRef,
-                private differs: IterableDiffers) {
+        private differs: IterableDiffers) {
         this.differ = differs.find([]).create(null);
     }
 
@@ -176,6 +194,19 @@ export class MultiselectDropdown implements OnInit, DoCheck, ControlValueAccesso
         this.settings = Object.assign(this.defaultSettings, this.settings);
         this.texts = Object.assign(this.defaultTexts, this.texts);
         this.title = this.texts.defaultTitle;
+
+        // if options type is IMultiSelectOption...
+        if (!Object.keys(this.options[0]).includes("groupName")) {
+            let newOpts = [{
+                groupName: undefined,
+                opts: this.options.map((value: IMultiSelectOption) => {
+                    return value;
+                })
+            }];
+            this.options = newOpts;
+        }
+
+        this.optionsWithoutGroup = this.options.reduce((prev: Array<IMultiSelectOption>, curr: IMultiSelectOptGroup) => { return prev.concat(curr.opts); }, []);
     }
 
     writeValue(value: any): void {
@@ -238,6 +269,17 @@ export class MultiselectDropdown implements OnInit, DoCheck, ControlValueAccesso
         this.onModelChange(this.model);
     }
 
+    hideGroup(event: Event, groupName: string) {
+        if (this.isHiddenGroup(groupName))
+            this.hiddenGroup.splice(this.hiddenGroup.indexOf(groupName), 1);
+        else
+            this.hiddenGroup.push(groupName);
+    }
+
+    isHiddenGroup(groupName: string): boolean {
+        return this.hiddenGroup.includes(groupName);
+    }
+
     updateNumSelected() {
         this.numSelected = this.model && this.model.length || 0;
     }
@@ -246,7 +288,7 @@ export class MultiselectDropdown implements OnInit, DoCheck, ControlValueAccesso
         if (this.numSelected === 0) {
             this.title = this.texts.defaultTitle;
         } else if (this.settings.dynamicTitleMaxItems >= this.numSelected) {
-            this.title = this.options
+            this.title = this.optionsWithoutGroup
                 .filter((option: IMultiSelectOption) => this.model && this.model.indexOf(option.id) > -1)
                 .map((option: IMultiSelectOption) => option.name)
                 .join(', ');
@@ -256,7 +298,7 @@ export class MultiselectDropdown implements OnInit, DoCheck, ControlValueAccesso
     }
 
     checkAll() {
-        this.model = this.options.map(option => option.id);
+        this.model = this.optionsWithoutGroup.map(option => option.id);
         this.onModelChange(this.model);
     }
 
